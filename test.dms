@@ -10,8 +10,11 @@ LOADFILE
 	Ryan: "Hello how are you doing?"
 	Bob: "I'm good you?"
 	
-	
 	list = {1,2,3,true,false, {1,2,3}}
+	a = list[1]
+	list[1] = "Hello"
+	
+	::label::
 	
 	choice "Pick one:":
 		"first" func()

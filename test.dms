@@ -1,42 +1,48 @@
-ENTRY main
-ENABLE test
-DISABLE test
-LOADFILE test.dat
-VERSION 1.4.5
-USING extendedDefine
-
+entry main
+enable warnings
+//enable debugging
+define 
+loadfile test.dat
+define
+version 1.2
+using extendedDefine as
 
 [main]
 	"This works!"
 	"What's up"
 
-	Ryan "Hello how are you doing?"
+	Ryan "Hello how are you doing?" // this is a comment
 	Bob "I'm good you?"
 
-	list = {1,2,3,true,false, {1,2,3}}
+	list = {1,2,3},true,"This is a string!",false, {3,2,1}
 	a = list[1]
+	/*
+		heheheh
+		sdfsdf
+		ghgfh
+		kjuty
+	*/
 	list[1] = "Hello"
-
+	var1,var2 = func(1,"string", 2+5)
+	func(1,"string", 2+5)	
 	::label::
-
+	//Hello im testing stuff
 	choice "Pick one:"  
 		"first" func()
 		"second" func()
 		"third" func()
 
 	for x = 1,10
-		group1A
-		group1B
 		for y = 1,10
-			group2A
-			group2B
 			for z = 1,10
-				group3A
-				group3B
+				"test"
+				"$x$ $y$ $z$"
 
+	test = true
+	test2 = false
+	
 	while cond
 		...
-
 	if cond
 		...
 	elseif cond
@@ -44,7 +50,13 @@ USING extendedDefine
 	else
 		...
 
-	var1,var2 = func(1,"string", 2+5)
-	func(1,"string", 2+5)	
+[Ryan:char]
+	age = 24
+	money = 100
+	
+
+[test:env]
 
 [newblock:function()]
+	"Test #2"
+	"Does it parse this part properly?"

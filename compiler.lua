@@ -421,7 +421,9 @@ function Interpreter:new(parser)
 	end
 	function c:visit_BinOp(node)
 		if node.op.type == PLUS then
-			return self:visit(node.left) + self:visit(node.right)
+			local a,b = self:visit(node.left),self:visit(node.right)
+			print("ADD ",a,b)
+			return a + b
 		elseif node.op.type == MINUS then
 			return self:visit(node.left) - self:visit(node.right)
 		elseif node.op.type == MUL then
@@ -450,31 +452,25 @@ end
 
 text = [[
 BEGIN
-    BEGIN
-        number := 2;
-        a := number;
-        b := 10 * a + 10 * number / 4;
-        c := a - - b
-    END;
-    x := 11;
+    ret := 11+a;
 END.
 ]]
 lexer = Lexer:new(text)
 parser = Parser:new(lexer)
 interpreter = Interpreter:new(parser)
-tprint(parser)
--- interpreter:interpret()
--- for i,v in pairs(interpreter.GLOBAL_SCOPE) do
--- 	print(i,v)
--- end
--- while true do
--- 	io.write("calc> ")
--- 	local text = io.read()
--- 	if text then
--- 		lexer = Lexer:new(text)
--- 		parser = Parser:new(lexer)
--- 		interpreter = Interpreter:new(parser)
--- 		result = interpreter:interpret()
--- 		print(result)
--- 	end
--- end
+interpreter.GLOBAL_SCOPE = {a=100}
+interpreter:interpret()
+for i,v in pairs(interpreter.GLOBAL_SCOPE) do
+	print(i,v)
+end
+while true do
+	io.write("calc> ")
+	local text = io.read()
+	if text then
+		lexer = Lexer:new(text)
+		parser = Parser:new(lexer)
+		interpreter = Interpreter:new(parser)
+		result = interpreter:interpret()
+		print(result)
+	end
+end

@@ -1,4 +1,37 @@
 -- Utils modify the global enviroment
+local symcount = {}
+local syms = {}
+for i=65,90 do
+    syms[#syms+1] = string.char(i)
+end
+for i=97,122 do
+    syms[#syms+1] = string.char(i)
+end
+local count = #syms+1
+function gen(symbol,flush)
+    if flush == true then
+        symcount[symbol] = {1, 0}
+        return
+    end
+    symbol = symbol or "__"
+    if symcount[symbol] then
+        symcount[symbol][2] = symcount[symbol][2] + 1
+		if symcount[symbol][2]%count==0 then
+			symcount[symbol][2] = 1
+			symcount[symbol][1] = symcount[symbol][1] + 1
+		end
+        return symbol .. syms[symcount[symbol][1]%count]..syms[symcount[symbol][2]%count]
+    else
+        symcount[symbol] = {1, 0}
+        return gen(symbol)
+    end
+end
+function isLetter(c)
+    return c:lower():match("[%$_%l]")
+end
+function isDigit(c)
+    return c:lower():match("%d")
+end
 function string.tabs(str)
     local c = 0
     for i in str:gmatch(".") do
@@ -21,80 +54,9 @@ function tprint (tbl, indent)
             print(formatting)
             tprint(v, indent+1)
         elseif type(v) == 'boolean' then
-            print(formatting .. tostring(v))		
+            print(formatting .. "<" .. type(v).. ">" .. tostring(v))		
         else
-            print(formatting .. v)
+            print(formatting .. "<" .. type(v).. ">" .. tostring(v))
         end
     end
-end
-function string.split(s,pat)
-	local pat=pat or ","
-	local res = {}
-	local start = 1
-	local state = 0
-	local c = '.'
-    local elem = ''
-    local function helper()
-        if tonumber(elem) then
-            elem = tonumber(elem)
-        elseif elem:sub(1,1) == "\"" and elem:sub(-1,-1) == "\"" then
-            elem = elem:sub(2,-2)
-        elseif elem == "true" then
-            elem = true
-        elseif elem == "false" then
-            elem = false
-        elseif elem:sub(1,1) == "{" and elem:sub(-1,-1)=="}" then
-            elem = elem:sub(2,-2):split()
-        else
-            elem = "\1"..elem
-        end
-    end
-	for i = 1, #s do
-		c = s:sub(i, i)
-		if state == 0 or state == 3 then -- start state or space after comma
-			if state == 3 and c == ' ' then
-				state = 0 -- skipped the space after the comma
-			else
-				state = 0
-				if c == '"' or c=="'" then
-					state = 1
-					elem = elem .. '"'
-				elseif c=="{" then
-					state = 1
-                    elem = elem .. '{'
-                elseif c == pat then
-                    helper()
-					res[#res + 1] = elem
-					elem = ''
-					state = 3 -- skip over the next space if present
-				elseif c == "(" then
-					state = 1
-					elem = elem .. '('
-				else
-					elem = elem .. c
-				end
-			end
-		elseif state == 1 then -- inside quotes
-			if c == '"' or c=="'" then --quote detection could be done here
-				state = 0
-				elem = elem .. '"'
-			elseif c=="}" then
-				state = 0
-                elem = elem .. '}'
-			elseif c==")" then
-				state = 0
-                elem = elem .. ')'
-			elseif c == '\\' then
-				state = 2
-			else
-				elem = elem .. c
-			end
-		elseif state == 2 then -- after \ in string
-			elem = elem .. c
-            state = 1
-		end
-    end
-    helper()
-	res[#res + 1] = elem
-	return res
 end

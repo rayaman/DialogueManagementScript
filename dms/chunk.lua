@@ -15,13 +15,13 @@ function Chunk:new(cname,ctype,filename)
     c.chunkname = cname
     c.chunktype = ctype
     c.filename = filename
+    c.variables = {}
     c.pos = 0
     c.cmds = {}
-    c.labels = {} -- ["label"] = pos
     return c
 end
-function Chunk:addLabel(label)
-    self.labels[label] = self:count()
+function Chunk:addVariable(value)
+    self.varaiables[value.name] = value.value
 end
 function Chunk:addCmd(cmd)
     cmd.chunk = self

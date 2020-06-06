@@ -4,6 +4,7 @@ local Stack = require("dms.stack")
 local Chunk = require("dms.chunk")
 local Cmd = require("dms.cmd")
 local Value = require("dms.value")
+local Queue = require("dms.queue")
 local ENTR,ENAB,DISA,LOAD,VERN,USIN,STAT,DISP,ASGN,LABL,CHOI,OPTN,FORE,UNWN,WHLE,FNWR,FNNR,IFFF,ELIF,ELSE,DEFN,SKIP,COMP,INDX,JMPZ = "ENTR","ENAB","DISA","LOAD","VERN","USIN","STAT","DISP","ASGN","LABL","CHOI","OPTN","FORE","????","WHLE","FNWR","FNNR","IFFF","ELIF","ELSE","DEFN","SKIP","COMP","INDX","JMPZ"
 local controls = {STAT,CHOI,FORE,WHLE,IFFF,ELIF,ELSE}
 local flags = {ENTR,ENAB,DISA,LOAD,VERN,USIN,DEFN}
@@ -14,6 +15,9 @@ local recognizedFlags = {
 }
 local parser = {}
 parser.__index = parser
+local iStack = Stack:new()
+local fStack = Stack:new()
+local wStack = Stack:new()
 function parser:new(path)
     local c = {}
     setmetatable(c,self)
@@ -333,12 +337,12 @@ function parser:parse()
             groupStack:append{line_num,group,IFFF,self.filename,line:trim()}
         elseif line:match("else%s*(.+)") then
             groupStack:append{line_num,group,ELSE,self.filename,line:trim()}
-        elseif line:match("[%s,%$_%w]*=(.+)") then
-            groupStack:append{line_num,group,ASGN,self.filename,line:trim()}
         elseif line:match("[%l_][%w_]-%(.+%)") then
             groupStack:append{line_num,group,FNNR,self.filename,line:trim()}
-        elseif line:match("\"(.+)\"") then
+        elseif line:match("\"(.+)\"") and not line:match("=.-\".-\"") then
             groupStack:append{line_num,group,DISP,self.filename,line:trim()}
+        elseif line:match("[%s,%$_%w]-=(.+)") then
+            groupStack:append{line_num,group,ASGN,self.filename,line:trim()}
         else
             groupStack:append{line_num,group,UNWN,self.filename,line:trim()}
         end
@@ -403,9 +407,21 @@ function parser:parse()
     end
 end
 local EQ,GTE,LTE,NEQ,GT,LT = "=",char(242),char(243),char(247),">","<"
+function parser:JMPZ(v,label)
+    local cmd = Cmd:new({self.current_lineStats[1],0,JMPZ,self.current_lineStats[2],"?"},JMPZ,{label = label,var = v})
+    function cmd:tostring()
+        return self.args.var .. ", " ..self.args.label
+    end
+    self.current_chunk:addCmd(cmd)
+end
 function parser:parseIFFF(line)
+    line[5] = self:logicChop(line[5])
     print(line[5])
-    print(self:logicChop(line[5]))
+    local v = self:parseExpr(line[5])
+    local labelE = gen("$labelEnd_")
+    self:JMPZ(v,labelE)
+    iStack:push({cmds = Queue:new()})
+    io.read()
 end
 function parser:buildLogic(l,o,r,v)
     local cmd = Cmd:new({self.current_lineStats[1],0,COMP,self.current_lineStats[2],"?"},COMP,{left=l,op=o,right=r,var=v})
@@ -699,7 +715,7 @@ function parser:parseChoice(line)
     local choice = {text = text,options = {}}
     local cmd = Cmd:new(line,CHOI,choice)
     function cmd:tostring()
-        return "\""..self.args.text.."\" {"..table.concat(self.args.options,", ").."}"-- disp choices
+        return "\""..self.args.text.."\", "..table.concat(self.args.options,", ")-- disp choices
     end
     self.current_chunk:addCmd(cmd)
     if copt[3]~=OPTN then

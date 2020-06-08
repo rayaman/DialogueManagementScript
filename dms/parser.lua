@@ -1,11 +1,12 @@
 require("dms.utils")
+file = io.open("dump.dat","wb")
 local char = string.char
 local Stack = require("dms.stack")
 local Chunk = require("dms.chunk")
 local Cmd = require("dms.cmd")
 local Value = require("dms.value")
 local Queue = require("dms.queue")
-local ENTR,ENAB,DISA,LOAD,VERN,USIN,STAT,DISP,ASGN,LABL,CHOI,OPTN,FORE,UNWN,WHLE,FNWR,FNNR,IFFF,ELIF,ELSE,DEFN,SKIP,COMP,INDX,JMPZ = "ENTR","ENAB","DISA","LOAD","VERN","USIN","STAT","DISP","ASGN","LABL","CHOI","OPTN","FORE","????","WHLE","FNWR","FNNR","IFFF","ELIF","ELSE","DEFN","SKIP","COMP","INDX","JMPZ"
+local ENTR,ENAB,DISA,LOAD,VERN,USIN,STAT,DISP,ASGN,LABL,CHOI,OPTN,FORE,UNWN,WHLE,FNWR,FNNR,IFFF,ELIF,ELSE,DEFN,SKIP,COMP,INDX,JMPZ,NOOP = "ENTR","ENAB","DISA","LOAD","VERN","USIN","STAT","DISP","ASGN","LABL","CHOI","OPTN","FORE","????","WHLE","FNWR","FNNR","IFFF","ELIF","ELSE","DEFN","SKIP","COMP","INDX","JMPZ","NOOP"
 local controls = {STAT,CHOI,FORE,WHLE,IFFF,ELIF,ELSE}
 local flags = {ENTR,ENAB,DISA,LOAD,VERN,USIN,DEFN}
 local recognizedFlags = {
@@ -15,16 +16,17 @@ local recognizedFlags = {
 }
 local parser = {}
 parser.__index = parser
-local iStack = Stack:new()
-local fStack = Stack:new()
-local wStack = Stack:new()
-function parser:new(path)
+local controlStack = Stack:new() -- Handles If/elseif/else while/for loops
+function parser:new(path,cc)
     local c = {}
     setmetatable(c,self)
+    if cc then
+        c.internal = true
+    end
     c.filename = path or error("Must provied a path!")
-    c.content = io.open(c.filename,"rb"):read("*a")
+    c.content = io.open(c.filename,"rb"):read("*a") .. "\n"
     c.flags = {}
-    c.chunks = {}
+    c.chunks = cc or {}
     c.ver = {1,0,0}
     c.pos = 0
     c.lines = {}
@@ -70,7 +72,7 @@ function parser:manageFlag(line)
             if not self:isRecognizedFlag(dat) then self:warn("Flag \""..dat.."\" is not recognized!",line) end
             self.flags[dat] = false
         elseif flag == LOAD then
-            -- TODO
+            parser:new(dat,self.chunks):parse()
         elseif flag == VERN then
             local v
             local a,b,c = dat:match("(%d*)%.?(%d*)%.?(%d*)")
@@ -295,7 +297,6 @@ function parser:parse()
         end
         if line=="" then goto continue end
         ::back::
-        self.current_lineStats = {line_num,self.filename}
         if line:match("^%[[_:,%w%(%)]+%]") then
             groupStack:append{line_num,group,STAT,self.filename,line:trim()}
             noblock = false
@@ -331,17 +332,17 @@ function parser:parse()
             end
         elseif line:match("[%s,%$_%w]*=%s*[%l_][%w_]-%(.+%)") then
             groupStack:append{line_num,group,FNWR,self.filename,line:trim()}
+        elseif line:trim():match("[%s,%$_%w]-\".+\"") == line:trim():match(".+") then
+            groupStack:append{line_num,group,DISP,self.filename,line:trim()}
         elseif line:match("elseif%s*(.+)") then
             groupStack:append{line_num,group,ELIF,self.filename,line:trim()}
         elseif line:match("if%s*(.+)") then
             groupStack:append{line_num,group,IFFF,self.filename,line:trim()}
         elseif line:match("else%s*(.+)") then
             groupStack:append{line_num,group,ELSE,self.filename,line:trim()}
-        elseif line:match("[%l_][%w_]-%(.+%)") then
+        elseif line:match("[%l_][%w_]-%(.+%)") and not line:match("[%s,%$_%w]-=(.+)") then
             groupStack:append{line_num,group,FNNR,self.filename,line:trim()}
-        elseif line:match("\"(.+)\"") and not line:match("=.-\".-\"") then
-            groupStack:append{line_num,group,DISP,self.filename,line:trim()}
-        elseif line:match("[%s,%$_%w]-=(.+)") then
+        elseif line:match("[%s,%$_%w]-=(.+)") and not line:match("[%l_][%w_]-%(.+%)") then
             groupStack:append{line_num,group,ASGN,self.filename,line:trim()}
         else
             groupStack:append{line_num,group,UNWN,self.filename,line:trim()}
@@ -359,31 +360,37 @@ function parser:parse()
         return k1[1]<k2[1]
     end)
     self.lines = arr
-    local chunks = {}
     local handler = Stack:new()
     local v = self:next()
     while v ~= nil do
+        self.current_line = v
         if self:isFlag(v) then
             self:manageFlag(v)
         elseif self:isControl(v) then
+            --print("CTRL",table.concat(v,"\t"))
             if v[3] == STAT then
-                print("BLOCK",table.concat(v,"\t"))
                 if self.current_chunk then
-                    chunks[self.current_chunk.chunkname] = self.current_chunk
+                    self.current_chunk:finished()
+                    self.chunks[self.current_chunk.chunkname] = self.current_chunk
                 end
                 local cname,ctype = v[5]:match("%[(%w+):*(.-)%]")
                 if #ctype == 0 then ctype = "block" end
                 self:debug("Registering Block: \""..cname.."\" type: \""..(ctype:match("(.+)%(") or ctype).."\"")
                 self.current_chunk = Chunk:new(cname,ctype,v[4])
-                if chunks[cname] then self:error("Chunk \""..cname.."\" has already been defined!",v) end
+                if self.chunks[cname] then self:error("Chunk \""..cname.."\" has already been defined in file: "..self.chunks[cname].filename,v) end
             elseif v[3] == CHOI then
                 self:parseChoice(v)
             elseif v[3] == IFFF then
-                self:parseIFFF(v) 
-            else
-                print("CTRL",table.concat(v,"\t"))
+                self:parseIFFF(v)
+            elseif v[3] == ELIF then
+                self:parseELIF(v)
+            elseif v[3] == ELSE then
+                self:parseELSE(v)
+            elseif v[3] == NOOP then
+                self:NOOP()
             end
         else
+            --print("FUNC",table.concat(v,"\t"))
             if v[3] == DISP then
                 self:parseDialogue(v)
             elseif v[3] == FNNR then
@@ -395,43 +402,118 @@ function parser:parse()
             elseif v[3] == LABL then
                 self:parseLABL(v)
             end
-            print("FUNC",table.concat(v,"\t"))
         end
         v = self:next()
     end
-    if current_chunk then
-        chunks[current_chunk.chunkname] = current_chunk
+    if self.current_chunk then
+        self.current_chunk:finished()
+        self.chunks[self.current_chunk.chunkname] = self.current_chunk
     end
-    for i,v in pairs(chunks) do
-        print(i,v)
+    if not self.internal then
+        local filedat = ""
+        for i,v in pairs(self.chunks) do
+            filedat = filedat..tostring(v) .. "\n"
+        end
+        file:write(filedat)
+        file:flush()
     end
+    return self.chunks
 end
 local EQ,GTE,LTE,NEQ,GT,LT = "=",char(242),char(243),char(247),">","<"
 function parser:JMPZ(v,label)
-    local cmd = Cmd:new({self.current_lineStats[1],0,JMPZ,self.current_lineStats[2],"?"},JMPZ,{label = label,var = v})
+    if not v then error("Fix this now!!!") end
+    local cmd = Cmd:new({self.current_line[1],self.current_line[2],JMPZ,self.current_line[4],"?"},JMPZ,{label = label,var = v})
     function cmd:tostring()
         return self.args.var .. ", " ..self.args.label
     end
     self.current_chunk:addCmd(cmd)
 end
+function parser:NOOP()
+    local cmd = Cmd:new({self.current_line[1],self.current_line[2],NOOP,self.current_line[4],"?"},NOOP,{})
+    function cmd:tostring()
+        return ""
+    end
+    self.current_chunk:addCmd(cmd)
+end
+local fStack = Stack:new()
+local function checkELIS()
+    local stackfix = fStack:peek()[3]
+    --print("STACK TEST:",stackfix)
+    if stackfix then stackfix() fStack:peek()[3]=nil end
+end
+function parser:processIFFFBlock()
+    local test = self:peek()
+    local dat = fStack:peek()
+    local labelE,labelN = dat[1],dat[2]
+    --print("Current line is an",self.current_line[3],self.current_line[5])
+    --print(test[3])
+    if self.current_line[3] == ELIF then
+        self:parseFNNR({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"JUMP(\""..labelE.."\")"})
+        self:parseLABL({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"::"..labelN.."::"})
+    elseif self.current_line[3] == ELSE then
+        self:parseFNNR({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"JUMP(\""..labelE.."\")"})
+        self:parseLABL({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"::"..labelN.."::"})
+    else
+        --print("Popping FStack")
+        fStack:pop()
+        self:parseFNNR({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"JUMP(\""..labelE.."\")"})
+        self:parseLABL({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"::"..labelE.."::"})
+    end
+end
+function parser:parseELSE(line)
+    checkELIS()
+    local cmd = Cmd:new()
+    self:NOOP()
+    --self:parseLABL({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"::".."WTF".."::"})
+    self.current_chunk:setScope(function()
+        local labelE = fStack:pop()[1]
+        self:parseLABL({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"::"..labelE.."::"})
+    end) -- Finishes the IFFF scope
+end
 function parser:parseIFFF(line)
-    line[5] = self:logicChop(line[5])
-    print(line[5])
-    local v = self:parseExpr(line[5])
+    local tempfunc
+    if fStack:count()>0 then
+        --print("We have a nested if going on... Lets work on this")
+        local dat = fStack:peek()
+        local lE,lN = dat[1],dat[2]
+        local lG = gen("$labelNext_")
+        fStack:peek()[3] = function()
+            --print("HERE WE ARE!",lE,lN,lG)
+            self:parseFNNR({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"JUMP(\""..lE.."\")"})
+            self:parseLABL({self.current_line[1],self.current_line[2],self.current_line[3],self.current_line[4],"::"..lN.."::"})
+        end
+    end
+    local l = self:logicChop(line[5])
+    local v = self:parseExpr(l)
     local labelE = gen("$labelEnd_")
-    self:JMPZ(v,labelE)
-    iStack:push({cmds = Queue:new()})
-    io.read()
+    local labelN = gen("$labelNext_")
+    self:JMPZ(v,labelN)
+    fStack:push({labelE,labelN})
+    self.current_chunk:setScope(function()
+        self:processIFFFBlock()
+    end) -- Sets the scope to IFFF. The chunk object handles everything
+end
+function parser:parseELIF(line)
+    checkELIS()
+    line[5] = line[5]:sub(5,-1)
+    line[5] = self:logicChop(line[5])
+    local v = self:parseExpr(line[5])
+    local labelN = gen("$labelNext_")
+    fStack:peek()[2]=labelN
+    self:JMPZ(v,labelN)
+    self.current_chunk:setScope(function()
+        self:processIFFFBlock()
+    end) -- Continues the scope to ELIF.
 end
 function parser:buildLogic(l,o,r,v)
-    local cmd = Cmd:new({self.current_lineStats[1],0,COMP,self.current_lineStats[2],"?"},COMP,{left=l,op=o,right=r,var=v})
+    local cmd = Cmd:new({self.current_line[1],self.current_line[2],COMP,self.current_line[4],"?"},COMP,{left=l,op=o,right=r,var=v})
     function cmd:tostring()
         return table.concat({self.args.op,tostring(self.args.left),tostring(self.args.right)},", ").." -> "..self.args.var
     end
     self.current_chunk:addCmd(cmd)
 end
 function parser:buildIndex(name,ind,v)
-    local cmd = Cmd:new({self.current_lineStats[1],0,INDX,self.current_lineStats[2],"?"},INDX,{name = name, index = ind, var = v})
+    local cmd = Cmd:new({self.current_line[1],self.current_line[2],INDX,self.current_line[3],"?"},INDX,{name = name, index = ind, var = v})
     function cmd:tostring()
         return table.concat({tostring(self.args.name),tostring(self.args.index)},", ").." -> "..self.args.var
     end
@@ -440,8 +522,7 @@ end
 function parser:logicChop(expr)
     expr = expr:gsub("([_%w]+)(%b())",function(func,args)
         local v = gen("$")
-        print(v.." = "..func..args)
-        local fnwr = {self.current_lineStats[1],0,FWNR,self.current_lineStats[2],v.." = "..func..args}
+        local fnwr = {self.current_line[1],self.current_line[2],FWNR,self.current_line[4],v.." = "..func..args}
         self:parseFNWR(fnwr)
         return v
     end)
@@ -466,7 +547,7 @@ function parser:logicChop(expr)
         if l~='' then
             o = op
         else
-            self:error("Invalid Syntax 2")
+            self:error("Invalid Syntax",self.current_line)
         end
     end
     local function index(right)
@@ -488,7 +569,6 @@ function parser:logicChop(expr)
             elem = elem .. v
         elseif l~= "" and r=="" then
             v = gen("$")
-            print(l.."["..ind.."] -> "..v)
             l = v
         end
         if not(c=="]") then
@@ -594,8 +674,7 @@ function parser:logicChop(expr)
                     elem = elem .. v
                 end
             else
-                print(l,o,r)
-                self:error("Invalid syntax!")
+                self:error("Invalid syntax!",self.current_line)
             end
         else
             elem = elem .. c
@@ -660,19 +739,17 @@ function parser:chop(expr)
     for l,o,r in expr:gmatch("(.-)([/%^%+%-%*%%])(.+)") do
         if r:match("(.-)([/%^%+%-%*%%])(.+)") then
             local v = gen("$")
-            --print(l,o,self:chop(r),"->",v)
             self:buildMFunc(l,o,self:chop(r),v)
             return v
         else
             local v = gen("$")
-            --print(l,o,r,"->",v)
             self:buildMFunc(l,o,r,v)
             return v
         end
     end
 end
 function parser:buildMFunc(l,o,r,v)
-    local fnwr = {self.current_lineStats[1],0,FWNR,self.current_lineStats[2]}
+    local fnwr = {self.current_line[1],self.current_line[2],FWNR,self.current_line[4]}
     local line
     if o == "+" then
         line = v.." = ADD("..table.concat({l,r},",")..")"
@@ -693,6 +770,7 @@ function parser:buildMFunc(l,o,r,v)
     self:parseFNWR(fnwr)
 end
 function parser:parseExpr(expr)
+    if not expr:match("[/%^%+%-%*%%]") then --[[print("No math to do!")]] return expr end
     -- handle pharanses
     expr=expr:gsub("([%W])(%-%d)",function(b,a)
 		return b.."(0-"..a:match("%d+")..")"
@@ -700,7 +778,7 @@ function parser:parseExpr(expr)
     -- Work on functions
     expr = expr:gsub("([_%w]+)(%b())",function(func,args)
         local v = gen("$")
-        local fnwr = {self.current_lineStats[1],0,FWNR,self.current_lineStats[2],v.." = "..func..args}
+        local fnwr = {self.current_line[1],self.current_line[2],FWNR,self.current_line[4],v.." = "..func..args}
         self:parseFNWR(fnwr)
         return v
     end)

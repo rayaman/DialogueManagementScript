@@ -2,7 +2,7 @@ entry main
 enable warnings
 //enable debugging
 define 
-loadfile test.dat
+loadfile loadtest.dms
 define
 version 1.2
 using extendedDefine as
@@ -51,17 +51,25 @@ using extendedDefine as
 		...
 	if (func(123)!=name[1] or true == "Bob") and foodCount >= 10.34
 		"test=true or test2=false!"
-	elseif cond
-		...
+		"help me"
+		if cool == true
+			"We are here"
+			"Nested if"
+		elseif food >= 21
+			"This is getting weird"
+		"Hi"
+	elseif (func2(321)!=name2[1] or true == "Bob2") and foodCount2 >= 100.78
+		"This Block"
 	else
-		...
+		"That Block"
+	"ah this is why no pop"
 
 [Ryan:char]
 	age = 24
 	money = 100
 	
-
 [test:env]
+	"test"
 
 [newblock:function()]
 	"Test #2"

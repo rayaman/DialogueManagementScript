@@ -1,4 +1,4 @@
 package.path="?.lua;?/init.lua;?.lua;?/?/init.lua;"..package.path
-local parser = require("dms.parser")
-local p = parser:new("test.dms")
-p:parse()
+local Interpreter = require("dms.interpreter")
+local i = Interpreter:new("test.dms")
+print(i:dump())

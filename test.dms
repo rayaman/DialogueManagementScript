@@ -15,8 +15,12 @@ using extendedDefine as
 	Bob "I'm good you?"
 	
 	tester = "Hello"
+	
+	food = 3
+	
+	hi = {1,2,3}
 
-	list,test = {{1,2+food,3},true,tester,123,"This is a string!",false, {3,2,1}},5
+	list,test = {{1,2+food,hi[3]},true,tester,123,"This is a string!",false, {3,2,1}},5
 	a = list[1]
 	/*
 		heheheh

@@ -1,12 +1,10 @@
 require("dms.utils")
-file = io.open("dump.dat","wb")
 local char = string.char
 local Stack = require("dms.stack")
 local Chunk = require("dms.chunk")
 local Cmd = require("dms.cmd")
-local Value = require("dms.value")
 local Queue = require("dms.queue")
-local ENTR,ENAB,DISA,LOAD,VERN,USIN,STAT,DISP,ASGN,LABL,CHOI,OPTN,FORE,UNWN,WHLE,FNWR,FNNR,IFFF,ELIF,ELSE,DEFN,SKIP,COMP,INDX,JMPZ,NOOP = "ENTR","ENAB","DISA","LOAD","VERN","USIN","STAT","DISP","ASGN","LABL","CHOI","OPTN","FORE","????","WHLE","FNWR","FNNR","IFFF","ELIF","ELSE","DEFN","SKIP","COMP","INDX","JMPZ","NOOP"
+local ENTR,ENAB,DISA,LOAD,VERN,USIN,STAT,DISP,ASGN,LABL,CHOI,OPTN,FORE,UNWN,WHLE,FNWR,FNNR,IFFF,ELIF,ELSE,DEFN,SKIP,COMP,INDX,JMPZ,NOOP,INST = "ENTR","ENAB","DISA","LOAD","VERN","USIN","STAT","DISP","ASGN","LABL","CHOI","OPTN","FORE","????","WHLE","FNWR","FNNR","IFFF","ELIF","ELSE","DEFN","SKIP","COMP","INDX","JMPZ","NOOP","INST"
 local controls = {STAT,CHOI,FORE,WHLE,IFFF,ELIF,ELSE}
 local flags = {ENTR,ENAB,DISA,LOAD,VERN,USIN,DEFN}
 local recognizedFlags = {
@@ -118,25 +116,7 @@ function parser:split(s,pat,l)
 	local state = 0
 	local c = '.'
     local elem = ''
-    local function helper()
-        if tonumber(elem) then
-            elem = tonumber(elem)
-        elseif elem:sub(1,1) == "\"" and elem:sub(-1,-1) == "\"" then
-            elem = elem:sub(2,-2)
-        elseif elem == "true" then
-            elem = true
-        elseif elem == "false" then
-            elem = false
-        elseif elem:sub(1,1)=="{" and elem:sub(-1,-1)=="}" then
-            elem = self:split(elem:sub(2,-2),nil,true)
-        elseif elem:match("[%-%+/%%%(%)%*%^]") then
-            gen("$",true) -- Flush the temp variables
-            elem = "\1"..self:parseExpr(elem)
-        else 
-            -- \1 Tells the interperter that we need to do a lookup
-            elem = "\1"..elem
-        end
-    end
+    local v
     local counter = 0
     local function next()
         counter = counter + 1
@@ -145,13 +125,61 @@ function parser:split(s,pat,l)
     local function peek()
         return s:sub(counter + 1,counter + 1)
     end
+    local function index(right)
+        local ind = ""
+        c = peek()
+        while c ~= "]" do
+            next()
+            ind = ind..c
+            c = peek()
+        end
+        c = next()
+        print(elem,ind)
+        local vv = gen("$")
+        self:buildIndex(elem,ind,vv)
+        elem = vv
+        if not(c=="]") then
+            self:error("']' expected to close '['")
+        end
+    end
+    
+    local function packTable(tab)
+        print("Doing list!")
+        local vv = gen("&")
+        for i,k in ipairs(tab) do
+            v = gen("&")
+            self:parseASGN({self.current_line[1],self.current_line[2],ASGN,self.current_line[4],v.." = "..tostring(k)})
+            self:buildInsert(vv,i,v)
+            print(vv,i,v,k)
+        end
+        return vv
+    end
+    local function helper()
+        if tonumber(elem) then
+            elem = tonumber(elem)
+        elseif elem:sub(1,1) == "\"" and elem:sub(-1,-1) == "\"" then
+            elem = elem
+        elseif elem == "true" then
+            elem = true
+        elseif elem == "false" then
+            elem = false
+        elseif elem:sub(1,1)=="{" and elem:sub(-1,-1)=="}" then
+            elem = packTable()
+        elseif elem:match("[%-%+/%%%(%)%*%^]") then
+            gen("$",true) -- Flush the temp variables
+            elem = self:parseExpr(elem)
+        else
+            --\1 Tells the interperter that we need to do a lookup
+            elem = elem
+        end
+    end
     local function getarr()
         local a = peek()
         local str = ""
         local open = 1
         while open~=0 and a~="" do
             a = next()
-            if a == "{" then
+            if a == "{" then 
                 open = open+1
             end
             if a == "}" then
@@ -167,7 +195,6 @@ function parser:split(s,pat,l)
         next()
         return str
     end
-    c = true
 	while c~="" do
 		c = next()
 		if state == 0 or state == 3 then -- start state or space after comma
@@ -175,12 +202,41 @@ function parser:split(s,pat,l)
 				state = 0 -- skipped the space after the comma
 			else
 				state = 0
-				if c == '"' or c=="'" then
-					state = 1
-					elem = elem .. '"'
+				if c == '"' then
+                    c = peek()
+                    str = ""
+                    while c~="\"" do
+                        next()
+                        if c=="\\" and peek()=="\"" then
+                            next()
+                            str = str .. "\""
+                        else
+                            str = str .. c
+                        end
+                        c = peek()
+                    end
+                    elem = elem .. "\""..str.."\""
+                    next()
+                elseif c == "'" then
+                    elem = elem .. "'"
+                    c = peek()
+                    while c~="'" do
+                        next()
+                        if c=="\\" and peek()=="'" then
+                            next()
+                            elem = elem + "'"
+                        else
+                            elem = elem .. c
+                        end
+                        c = peek()
+                    end
+                    elem = elem .. "\""..str.."\""
+                    next()
+                elseif c == "[" then
+                    index()
                 elseif c=="{" then
                     local t = self:split(getarr(),nil,true)
-                    res[#res + 1] = t
+                    res[#res + 1] = packTable(t)
                     elem = ''
                     state = 3
                 elseif c == pat then
@@ -196,10 +252,7 @@ function parser:split(s,pat,l)
 				end
 			end
 		elseif state == 1 then -- inside quotes
-			if c == '"' or c=="'" then --quote detection could be done here
-				state = 0
-				elem = elem .. '"'
-			elseif c=="}" then
+			if c=="}" then
 				state = 0
                 elem = elem .. '}'
 			elseif c==")" then
@@ -330,9 +383,9 @@ function parser:parse()
             else
                 goto back
             end
-        elseif line:match("[%s,%$_%w]*=%s*[%l_][%w_]-%(.+%)") then
+        elseif line:match("[%s,_%w]*=%s*[%l_][%w_]-%(.+%)") then
             groupStack:append{line_num,group,FNWR,self.filename,line:trim()}
-        elseif line:trim():match("[%s,%$_%w]-\".+\"") == line:trim():match(".+") then
+        elseif line:trim():match("[%s_%w]-\".+\"") == line:trim():match(".+") then
             groupStack:append{line_num,group,DISP,self.filename,line:trim()}
         elseif line:match("elseif%s*(.+)") then
             groupStack:append{line_num,group,ELIF,self.filename,line:trim()}
@@ -340,9 +393,9 @@ function parser:parse()
             groupStack:append{line_num,group,IFFF,self.filename,line:trim()}
         elseif line:match("else%s*(.+)") then
             groupStack:append{line_num,group,ELSE,self.filename,line:trim()}
-        elseif line:match("[%l_][%w_]-%(.+%)") and not line:match("[%s,%$_%w]-=(.+)") then
+        elseif line:match("[%l_][%w_]-%(.+%)") and not line:match("[%s,_%w]-=(.+)") then
             groupStack:append{line_num,group,FNNR,self.filename,line:trim()}
-        elseif line:match("[%s,%$_%w]-=(.+)") and not line:match("[%l_][%w_]-%(.+%)") then
+        elseif line:match("[%s,_%w]-=(.+)") and not line:match("[%l_][%w_]-%(.+%)") then
             groupStack:append{line_num,group,ASGN,self.filename,line:trim()}
         else
             groupStack:append{line_num,group,UNWN,self.filename,line:trim()}
@@ -409,14 +462,6 @@ function parser:parse()
         self.current_chunk:finished()
         self.chunks[self.current_chunk.chunkname] = self.current_chunk
     end
-    if not self.internal then
-        local filedat = ""
-        for i,v in pairs(self.chunks) do
-            filedat = filedat..tostring(v) .. "\n"
-        end
-        file:write(filedat)
-        file:flush()
-    end
     return self.chunks
 end
 local EQ,GTE,LTE,NEQ,GT,LT = "=",char(242),char(243),char(247),">","<"
@@ -424,7 +469,7 @@ function parser:JMPZ(v,label)
     if not v then error("Fix this now!!!") end
     local cmd = Cmd:new({self.current_line[1],self.current_line[2],JMPZ,self.current_line[4],"?"},JMPZ,{label = label,var = v})
     function cmd:tostring()
-        return self.args.var .. ", " ..self.args.label
+        return self.args.var.."\0" .. ", " ..self.args.label.."\0"
     end
     self.current_chunk:addCmd(cmd)
 end
@@ -508,14 +553,21 @@ end
 function parser:buildLogic(l,o,r,v)
     local cmd = Cmd:new({self.current_line[1],self.current_line[2],COMP,self.current_line[4],"?"},COMP,{left=l,op=o,right=r,var=v})
     function cmd:tostring()
-        return table.concat({self.args.op,tostring(self.args.left),tostring(self.args.right)},", ").." -> "..self.args.var
+        return table.concat({self.args.op,tostring(self.args.left).."\0",tostring(self.args.right).."\0"},", ")..", "..self.args.var.."\0"
+    end
+    self.current_chunk:addCmd(cmd)
+end
+function parser:buildInsert(name,ind,v)
+    local cmd = Cmd:new({self.current_line[1],self.current_line[2],INST,self.current_line[3],"?"},INST,{name = name, index = ind, var = v})
+    function cmd:tostring()
+        return table.concat({tostring(self.args.name),tostring(self.args.index)},"\0, ")..", "..self.args.var.."\0"
     end
     self.current_chunk:addCmd(cmd)
 end
 function parser:buildIndex(name,ind,v)
     local cmd = Cmd:new({self.current_line[1],self.current_line[2],INDX,self.current_line[3],"?"},INDX,{name = name, index = ind, var = v})
     function cmd:tostring()
-        return table.concat({tostring(self.args.name),tostring(self.args.index)},", ").." -> "..self.args.var
+        return table.concat({tostring(self.args.name),tostring(self.args.index)},"\0, ")..", "..self.args.var.."\0"
     end
     self.current_chunk:addCmd(cmd)
 end
@@ -647,7 +699,7 @@ function parser:logicChop(expr)
                 elseif l == "false" then
                     l = false
                 else
-                    l = "\1" .. l
+                    l = l
                 end
             elseif o~= '' then
                 r=c
@@ -666,7 +718,7 @@ function parser:logicChop(expr)
                     elseif r == "false" then
                         r = false
                     else
-                        r = "\1" .. r
+                        r = r
                     end
                     v = gen("$")
                     self:buildLogic(l,o,r,v)
@@ -696,6 +748,7 @@ function parser:logicChop(expr)
                 end
                 c = peek()
             end
+            str = "\""..str.."\""
             if l=="" then
                 l = str
             elseif r=="" then
@@ -711,14 +764,15 @@ function parser:logicChop(expr)
             c = peek()
             while c~="\"" do
                 next()
-                if c=="\\" and peek()=="\"" then
+                if c=="\\" and peek()=="'" then
                     next()
-                    elem = elem + "\""
+                    elem = elem + "'"
                 else
                     elem = elem .. c
                 end
                 c = peek()
             end
+            str = "\""..str.."\""
             if l=="" then
                 l = str
             elseif r=="" then
@@ -793,7 +847,7 @@ function parser:parseChoice(line)
     local choice = {text = text,options = {}}
     local cmd = Cmd:new(line,CHOI,choice)
     function cmd:tostring()
-        return "\""..self.args.text.."\", "..table.concat(self.args.options,", ")-- disp choices
+        return self.args.text.."\0, "..table.concat(self.args.options,"\0, ").."\0"-- disp choices
     end
     self.current_chunk:addCmd(cmd)
     if copt[3]~=OPTN then
@@ -804,7 +858,7 @@ function parser:parseChoice(line)
     while copt do
         copt = self:next()
         local a,b = copt[5]:match("(.+) %s*(.+)")
-        table.insert(choice.options,a)
+        table.insert(choice.options,a:sub(2,-2))
         table.insert(opts,b)
         copt = self:peek()
         if copt[3]~=OPTN then
@@ -831,9 +885,9 @@ function parser:parseFNNR(line)
     local cmd = Cmd:new(line,FNNR,{func=fname,args=args})
     function cmd:tostring()
         if #args==0 then
-            return fname
+            return fname.."\0"
         else
-            return table.concat({fname,table.concat(args,", ")},", ")
+            return table.concat({fname,table.concat(args,"\0, ")},"\0, ").."\0"
         end
     end
     self.current_chunk:addCmd(cmd)
@@ -848,7 +902,7 @@ function parser:parseFNWR(line)
     end
     local cmd = Cmd:new(line,FNWR,{func=fname,args=args,vars=vars})
     function cmd:tostring()
-        return table.concat({fname,table.concat(args,", ")},", ").." -> ".. table.concat(vars,", ")
+        return table.concat({fname,table.concat(args,"\0, ")},"\0, ").."\0, ".. table.concat(vars,"\0, ").."\0"
     end
     self.current_chunk:addCmd(cmd)
 end
@@ -858,18 +912,17 @@ function parser:parseASGN(line)
     assigns = self:split(assigns)
     local list = {}
     for i,v in ipairs(vars) do
-        table.insert(list,Value:new(v,assigns[i]))
+        table.insert(list,{tostring(assigns[i]).."\0",v.."\0"})
     end
     local cmd = Cmd:new(line,ASGN,list)
     function cmd:tostring()
         local str = ""
         for i,v in ipairs(self.args) do
-            str = str .. "(" .. tostring(v) .. " -> ".. v.name ..")" .. ", "
+            str = str .. "(" .. tostring(v[1]) .. ", ".. v[2] ..")" .. ", "
         end
         return str:sub(1,-3)
     end
     self.current_chunk:addCmd(cmd)
-    -- TODO: make dict lookups builtin
 end
 function parser:parseLABL(line)
     local label = line[5]:match("::(.+)::")
@@ -878,7 +931,7 @@ function parser:parseLABL(line)
     end
     local cmd = Cmd:new(line,LABL,{label = label})
     function cmd:tostring()
-        return self.args.label
+        return self.args.label.."\0"
     end
     self.current_chunk:addCmd(cmd)
 end
@@ -887,7 +940,7 @@ function parser:parseDialogue(line)
     if #targ == 0 then targ = nil end
     local cmd = Cmd:new(line,DISP,{text=text,target=targ})
     function cmd:tostring()
-        return table.concat({targ or "@",text},", ")
+        return table.concat({targ or "@",text},"\0, ").."\0"
     end
     self.current_chunk:addCmd(cmd)
 end

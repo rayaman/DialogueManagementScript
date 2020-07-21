@@ -16,15 +16,27 @@ function Interpreter:compile(file)
     if not file then error("You must provide a file path to compile!") end
     self.chunks = Parser:new(file,self.chunks):parse()
 end
-function Interpreter:dump()
+function Interpreter:dump(filename)
     local filedat = ""
-
+    local entry = self.parser.entry
+    if entry then
+        filedat = "ENTR "..entry.."\n"
+    end
+    local flags = self.parser.flags
+    for i,v in pairs(flags) do
+        filedat = filedat.."FLAG "..i..":"..tostring(v).."\n"
+    end
     for i,v in pairs(self.chunks) do
         filedat = filedat..tostring(v) .. "\n"
+    end
+    if filename then
+        file = io.open("dump.dat","wb")
+        file:write(filedat)
+        file:flush()
     end
     return filedat
 end
 function Interpreter:interprete()
-    --
+    
 end
 return Interpreter
